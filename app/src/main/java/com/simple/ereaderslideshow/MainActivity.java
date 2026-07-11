@@ -7,7 +7,9 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
+import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.media.ExifInterface;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -18,6 +20,7 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -58,11 +61,10 @@ public class MainActivity extends Activity {
 
         loadImageList();
         updateStatusText();
-        goToNext(); // 첫 이미지도 동일하게 플래싱 후 표시
+        goToNext();
         handler.postDelayed(slideRunnable, INTERVAL_MS);
     }
 
-    /** 물리 버튼(좌/우) 입력 처리 - 기기마다 키코드가 달라서 흔한 후보를 모두 처리 */
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         switch (keyCode) {
@@ -85,7 +87,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 버튼으로 수동 전환 시, 자동 전환 타이머를 리셋해서 곧바로 또 넘어가지 않게 함 */
     private void manualNext() {
         handler.removeCallbacks(slideRunnable);
         goToNext();
@@ -136,11 +137,6 @@ public class MainActivity extends Activity {
         flashThenShow(file);
     }
 
-    /**
-     * 이잉크 화면 잔상 제거용 깜빡임 처리.
-     * 검정 -> 흰색 -> 검정 순으로 화면을 크게 반전시켜서
-     * 기기의 완전 새로고침(풀 리프레시)을 유도한 뒤 실제 이미지를 표시한다.
-     */
     private void flashThenShow(final File file) {
         flashSequence(new Runnable() {
             @Override
@@ -249,8 +245,10 @@ public class MainActivity extends Activity {
             return;
         }
 
-        Bitmap grayscaled = toGrayscaleHighContrast(decoded);
-        decoded.recycle();
+        Bitmap rotated = applyExifOrientation(decoded, file.getAbsolutePath());
+
+        Bitmap grayscaled = toGrayscaleHighContrast(rotated);
+        rotated.recycle();
 
         imageView.setImageBitmap(grayscaled);
         if (currentBitmap != null && !currentBitmap.isRecycled()) {
@@ -259,7 +257,64 @@ public class MainActivity extends Activity {
         currentBitmap = grayscaled;
     }
 
-    /** 컬러 사진을 흑백(그레이스케일)으로 변환하고 대비를 강화해서 이잉크 화면에 최적화 */
+    /** 사진의 EXIF 방향 정보를 읽어서 올바른 방향으로 회전/반전시킨다 */
+    private Bitmap applyExifOrientation(Bitmap src, String path) {
+        Matrix matrix = new Matrix();
+        boolean hasTransform = true;
+
+        try {
+            ExifInterface exif = new ExifInterface(path);
+            int orientation = exif.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+
+            switch (orientation) {
+                case ExifInterface.ORIENTATION_ROTATE_90:
+                    matrix.setRotate(90);
+                    break;
+                case ExifInterface.ORIENTATION_ROTATE_180:
+                    matrix.setRotate(180);
+                    break;
+                case ExifInterface.ORIENTATION_ROTATE_270:
+                    matrix.setRotate(270);
+                    break;
+                case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                    matrix.setScale(-1, 1);
+                    break;
+                case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                    matrix.setRotate(180);
+                    matrix.postScale(-1, 1);
+                    break;
+                case ExifInterface.ORIENTATION_TRANSPOSE:
+                    matrix.setRotate(90);
+                    matrix.postScale(-1, 1);
+                    break;
+                case ExifInterface.ORIENTATION_TRANSVERSE:
+                    matrix.setRotate(270);
+                    matrix.postScale(-1, 1);
+                    break;
+                default:
+                    hasTransform = false;
+                    break;
+            }
+        } catch (IOException e) {
+            hasTransform = false;
+        }
+
+        if (!hasTransform) {
+            return src;
+        }
+
+        try {
+            Bitmap result = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), matrix, true);
+            if (result != src) {
+                src.recycle();
+            }
+            return result;
+        } catch (Throwable t) {
+            return src;
+        }
+    }
+
     private Bitmap toGrayscaleHighContrast(Bitmap src) {
         int width = src.getWidth();
         int height = src.getHeight();
@@ -267,11 +322,9 @@ public class MainActivity extends Activity {
         Bitmap result = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565);
         Canvas canvas = new Canvas(result);
 
-        // 1) 채도 제거 -> 흑백
         ColorMatrix grayMatrix = new ColorMatrix();
         grayMatrix.setSaturation(0);
 
-        // 2) 대비 강화 (1.0 = 원본, 값이 클수록 대비 강해짐)
         float contrast = 1.35f;
         float translate = (-0.5f * contrast + 0.5f) * 255f;
         ColorMatrix contrastMatrix = new ColorMatrix(new float[]{
