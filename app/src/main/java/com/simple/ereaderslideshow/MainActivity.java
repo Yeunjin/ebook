@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.util.DisplayMetrics;
+import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -52,6 +53,42 @@ public class MainActivity extends Activity {
         startSlideshow();
     }
 
+    /** 물리 버튼(좌/우) 입력 처리 - 기기마다 키코드가 달라서 흔한 후보를 모두 처리 */
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+            case KeyEvent.KEYCODE_PAGE_DOWN:
+            case KeyEvent.KEYCODE_VOLUME_DOWN:
+            case KeyEvent.KEYCODE_CHANNEL_DOWN:
+                manualNext();
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_PAGE_UP:
+            case KeyEvent.KEYCODE_VOLUME_UP:
+            case KeyEvent.KEYCODE_CHANNEL_UP:
+                manualPrevious();
+                return true;
+
+            default:
+                return super.onKeyDown(keyCode, event);
+        }
+    }
+
+    /** 버튼으로 수동 전환 시, 자동 전환 타이머를 리셋해서 곧바로 또 넘어가지 않게 함 */
+    private void manualNext() {
+        handler.removeCallbacks(slideRunnable);
+        showNextImage();
+        handler.postDelayed(slideRunnable, INTERVAL_MS);
+    }
+
+    private void manualPrevious() {
+        handler.removeCallbacks(slideRunnable);
+        showPreviousImage();
+        handler.postDelayed(slideRunnable, INTERVAL_MS);
+    }
+
     private void startSlideshow() {
         showNextImage();
         handler.postDelayed(slideRunnable, INTERVAL_MS);
@@ -81,12 +118,7 @@ public class MainActivity extends Activity {
         imageFiles.clear();
         File downloadDir = findDownloadDir();
 
-        String pathInfo;
-        if (downloadDir == null) {
-            pathInfo = "폴더를 찾을 수 없음";
-        } else if (!downloadDir.exists()) {
-            pathInfo = "경로 없음: " + downloadDir.getAbsolutePath();
-        } else {
+        if (downloadDir != null && downloadDir.exists()) {
             File[] files = downloadDir.listFiles();
             if (files != null) {
                 for (File f : files) {
@@ -95,15 +127,8 @@ public class MainActivity extends Activity {
                     }
                 }
             }
-            pathInfo = downloadDir.getAbsolutePath() + " | 전체파일 "
-                    + (files != null ? files.length : 0) + "개, 이미지 "
-                    + imageFiles.size() + "개";
         }
         Collections.sort(imageFiles);
-
-        if (statusText != null) {
-            statusText.setText(pathInfo);
-        }
     }
 
     private boolean isImage(String name) {
@@ -116,8 +141,15 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    private void updateStatusText() {
+        if (statusText != null) {
+            statusText.setText("이미지 " + imageFiles.size() + "장");
+        }
+    }
+
     private void showNextImage() {
         loadImageList();
+        updateStatusText();
 
         if (imageFiles.isEmpty()) {
             imageView.setImageBitmap(null);
@@ -129,20 +161,38 @@ public class MainActivity extends Activity {
             currentIndex = 0;
         }
 
-        File file = imageFiles.get(currentIndex);
-        Bitmap newBitmap = decodeSampledBitmap(file);
+        displayImage(imageFiles.get(currentIndex));
+        currentIndex++;
+    }
 
+    private void showPreviousImage() {
+        loadImageList();
+        updateStatusText();
+
+        if (imageFiles.isEmpty()) {
+            imageView.setImageBitmap(null);
+            currentIndex = 0;
+            return;
+        }
+
+        currentIndex -= 2;
+        if (currentIndex < 0) {
+            currentIndex = imageFiles.size() - 1;
+        }
+
+        displayImage(imageFiles.get(currentIndex));
+        currentIndex++;
+    }
+
+    private void displayImage(File file) {
+        Bitmap newBitmap = decodeSampledBitmap(file);
         if (newBitmap != null) {
             imageView.setImageBitmap(newBitmap);
             if (currentBitmap != null && !currentBitmap.isRecycled()) {
                 currentBitmap.recycle();
             }
             currentBitmap = newBitmap;
-        } else if (statusText != null) {
-            statusText.setText(statusText.getText() + " | 디코딩 실패: " + file.getName());
         }
-
-        currentIndex++;
     }
 
     private Bitmap decodeSampledBitmap(File file) {
