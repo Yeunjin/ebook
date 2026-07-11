@@ -16,13 +16,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * 아주 가벼운 이북 리더용 슬라이드쇼 앱.
- * - Downloads 폴더의 이미지를 1시간마다 자동 전환
- * - 화면이 꺼지거나 스크린세이버가 동작하지 않도록 유지
- * - 저사양 기기를 위해 라이브러리 의존성 없이 순수 SDK만 사용
- * - 하단에 진단용 상태 텍스트 표시 (문제 해결용)
- */
 public class MainActivity extends Activity {
 
     private static final long INTERVAL_MS = 60 * 60 * 1000; // 1시간
@@ -64,7 +57,6 @@ public class MainActivity extends Activity {
         handler.postDelayed(slideRunnable, INTERVAL_MS);
     }
 
-    /** 여러 후보 경로 중에서 실제 존재하는 다운로드 폴더를 대소문자 구분 없이 찾는다 */
     private File findDownloadDir() {
         File root = Environment.getExternalStorageDirectory();
         if (root != null && root.exists()) {
@@ -82,7 +74,6 @@ public class MainActivity extends Activity {
                 }
             }
         }
-        // 못 찾으면 표준 경로로 fallback
         return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
     }
 
