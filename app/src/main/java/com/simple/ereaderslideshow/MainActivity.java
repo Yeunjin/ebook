@@ -54,7 +54,7 @@ public class MainActivity extends Activity {
     private final List<File> imageFiles = new ArrayList<>();
     private final Random random = new Random();
 
-    private int currentIndex = -1;      // 현재 표시 중인 이미지의 imageFiles 내 위치 (0-based)
+    private int currentIndex = -1;      // 현재 표시 중인 이미지 위치 (0-based)
     private int intervalIndex = 3;      // 기본값: 60분
     private long intervalMs = INTERVAL_OPTIONS_MS[intervalIndex];
     private boolean randomMode = false; // false = 파일명 순번(straight), true = 랜덤
@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
         }
     };
 
+    // [수정] 우측 길게 누름: 간격 조정 (동작 후 플래그 확실히 true 고정)
     private final Runnable rightLongPressRunnable = new Runnable() {
         @Override
         public void run() {
@@ -80,6 +81,7 @@ public class MainActivity extends Activity {
         }
     };
 
+    // [수정] 좌측 길게 누름: 랜덤 모드 토글 (동작 후 플래그 확실히 true 고정)
     private final Runnable leftLongPressRunnable = new Runnable() {
         @Override
         public void run() {
@@ -112,7 +114,7 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_VOLUME_DOWN:
             case KeyEvent.KEYCODE_CHANNEL_DOWN:
                 if (event.getRepeatCount() == 0) {
-                    rightLongPressTriggered = false;
+                    rightLongPressTriggered = false; // 누르기 시작할 때 초기화
                     handler.postDelayed(rightLongPressRunnable, LONG_PRESS_MS);
                 }
                 return true;
@@ -122,7 +124,7 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_VOLUME_UP:
             case KeyEvent.KEYCODE_CHANNEL_UP:
                 if (event.getRepeatCount() == 0) {
-                    leftLongPressTriggered = false;
+                    leftLongPressTriggered = false; // 누르기 시작할 때 초기화
                     handler.postDelayed(leftLongPressRunnable, LONG_PRESS_MS);
                 }
                 return true;
@@ -139,20 +141,24 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_PAGE_DOWN:
             case KeyEvent.KEYCODE_VOLUME_DOWN:
             case KeyEvent.KEYCODE_CHANNEL_DOWN:
-                handler.removeCallbacks(rightLongPressRunnable);
+                handler.removeCallbacks(rightLongPressRunnable); // 예약된 롱프레스 취소
                 if (!rightLongPressTriggered) {
+                    // 롱프레스가 발동하지 않은 '짧은 누름'일 때만 다음 사진으로 이동
                     manualNext();
                 }
+                rightLongPressTriggered = false; // 떼어낼 때 플래그 초기화
                 return true;
 
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_PAGE_UP:
             case KeyEvent.KEYCODE_VOLUME_UP:
             case KeyEvent.KEYCODE_CHANNEL_UP:
-                handler.removeCallbacks(leftLongPressRunnable);
+                handler.removeCallbacks(leftLongPressRunnable); // 예약된 롱프레스 취소
                 if (!leftLongPressTriggered) {
+                    // 롱프레스가 발동하지 않은 '짧은 누름'일 때만 이전 사진으로 이동
                     manualPrevious();
                 }
+                leftLongPressTriggered = false; // 떼어낼 때 플래그 초기화
                 return true;
 
             default:
@@ -172,7 +178,7 @@ public class MainActivity extends Activity {
         handler.postDelayed(slideRunnable, intervalMs);
     }
 
-    /** 우측 버튼 길게 누름: 전환 주기를 순환 (5분→15분→30분→60분→12시간→24시간→...) */
+    /** 우측 버튼 길게 누름: 전환 주기를 순환 */
     private void cycleInterval() {
         intervalIndex = (intervalIndex + 1) % INTERVAL_OPTIONS_MS.length;
         intervalMs = INTERVAL_OPTIONS_MS[intervalIndex];
@@ -338,7 +344,6 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    /** 하단 상태 표시: "현재번호_전체 images / 주기 / 모드" */
     private void updateStatusText() {
         if (statusText == null) {
             return;
@@ -358,7 +363,6 @@ public class MainActivity extends Activity {
         }
 
         Bitmap rotated = applyExifOrientation(decoded, file.getAbsolutePath());
-
         Bitmap grayscaled = toGrayscaleHighContrast(rotated);
         rotated.recycle();
 
