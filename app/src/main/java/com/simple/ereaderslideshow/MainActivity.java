@@ -24,28 +24,67 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 
 public class MainActivity extends Activity {
 
-    private static final long INTERVAL_MS = 60 * 60 * 1000; // 1시간
-    private static final long FLASH_STEP_MS = 150; // 잔상 제거용 깜빡임 간격
+    private static final long FLASH_STEP_MS = 150;   // 잔상 제거용 깜빡임 간격
+    private static final long LONG_PRESS_MS = 800;    // 길게 누름 판정 시간
 
     private static final String[] IMAGE_EXTENSIONS = {
             ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"
+    };
+
+    // 전환 주기 옵션: 5분, 15분, 30분, 60분, 12시간, 24시간
+    private static final long[] INTERVAL_OPTIONS_MS = {
+            5 * 60 * 1000L,
+            15 * 60 * 1000L,
+            30 * 60 * 1000L,
+            60 * 60 * 1000L,
+            12 * 60 * 60 * 1000L,
+            24 * 60 * 60 * 1000L
+    };
+    private static final String[] INTERVAL_LABELS = {
+            "5min", "15min", "30min", "60min", "12hour", "24hour"
     };
 
     private ImageView imageView;
     private TextView statusText;
     private final Handler handler = new Handler();
     private final List<File> imageFiles = new ArrayList<>();
-    private int currentIndex = 0;
+    private final Random random = new Random();
+
+    private int currentIndex = -1;      // 현재 표시 중인 이미지의 imageFiles 내 위치 (0-based)
+    private int intervalIndex = 3;      // 기본값: 60분
+    private long intervalMs = INTERVAL_OPTIONS_MS[intervalIndex];
+    private boolean randomMode = false; // false = 파일명 순번(straight), true = 랜덤
+
     private Bitmap currentBitmap;
+
+    private boolean rightLongPressTriggered = false;
+    private boolean leftLongPressTriggered = false;
 
     private final Runnable slideRunnable = new Runnable() {
         @Override
         public void run() {
             goToNext();
-            handler.postDelayed(this, INTERVAL_MS);
+            handler.postDelayed(this, intervalMs);
+        }
+    };
+
+    private final Runnable rightLongPressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            rightLongPressTriggered = true;
+            cycleInterval();
+        }
+    };
+
+    private final Runnable leftLongPressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            leftLongPressTriggered = true;
+            toggleRandomMode();
         }
     };
 
@@ -62,7 +101,7 @@ public class MainActivity extends Activity {
         loadImageList();
         updateStatusText();
         goToNext();
-        handler.postDelayed(slideRunnable, INTERVAL_MS);
+        handler.postDelayed(slideRunnable, intervalMs);
     }
 
     @Override
@@ -72,14 +111,20 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_PAGE_DOWN:
             case KeyEvent.KEYCODE_VOLUME_DOWN:
             case KeyEvent.KEYCODE_CHANNEL_DOWN:
-                manualNext();
+                if (event.getRepeatCount() == 0) {
+                    rightLongPressTriggered = false;
+                    handler.postDelayed(rightLongPressRunnable, LONG_PRESS_MS);
+                }
                 return true;
 
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_PAGE_UP:
             case KeyEvent.KEYCODE_VOLUME_UP:
             case KeyEvent.KEYCODE_CHANNEL_UP:
-                manualPrevious();
+                if (event.getRepeatCount() == 0) {
+                    leftLongPressTriggered = false;
+                    handler.postDelayed(leftLongPressRunnable, LONG_PRESS_MS);
+                }
                 return true;
 
             default:
@@ -87,54 +132,114 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+            case KeyEvent.KEYCODE_PAGE_DOWN:
+            case KeyEvent.KEYCODE_VOLUME_DOWN:
+            case KeyEvent.KEYCODE_CHANNEL_DOWN:
+                handler.removeCallbacks(rightLongPressRunnable);
+                if (!rightLongPressTriggered) {
+                    manualNext();
+                }
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_PAGE_UP:
+            case KeyEvent.KEYCODE_VOLUME_UP:
+            case KeyEvent.KEYCODE_CHANNEL_UP:
+                handler.removeCallbacks(leftLongPressRunnable);
+                if (!leftLongPressTriggered) {
+                    manualPrevious();
+                }
+                return true;
+
+            default:
+                return super.onKeyUp(keyCode, event);
+        }
+    }
+
     private void manualNext() {
         handler.removeCallbacks(slideRunnable);
         goToNext();
-        handler.postDelayed(slideRunnable, INTERVAL_MS);
+        handler.postDelayed(slideRunnable, intervalMs);
     }
 
     private void manualPrevious() {
         handler.removeCallbacks(slideRunnable);
         goToPrevious();
-        handler.postDelayed(slideRunnable, INTERVAL_MS);
+        handler.postDelayed(slideRunnable, intervalMs);
+    }
+
+    /** 우측 버튼 길게 누름: 전환 주기를 순환 (5분→15분→30분→60분→12시간→24시간→...) */
+    private void cycleInterval() {
+        intervalIndex = (intervalIndex + 1) % INTERVAL_OPTIONS_MS.length;
+        intervalMs = INTERVAL_OPTIONS_MS[intervalIndex];
+
+        handler.removeCallbacks(slideRunnable);
+        handler.postDelayed(slideRunnable, intervalMs);
+
+        updateStatusText();
+    }
+
+    /** 좌측 버튼 길게 누름: 랜덤 <-> 파일명 순번 모드 전환 */
+    private void toggleRandomMode() {
+        randomMode = !randomMode;
+        updateStatusText();
     }
 
     private void goToNext() {
         loadImageList();
-        updateStatusText();
 
         if (imageFiles.isEmpty()) {
             flashThenClear();
-            currentIndex = 0;
+            currentIndex = -1;
+            updateStatusText();
             return;
         }
-        if (currentIndex >= imageFiles.size()) {
-            currentIndex = 0;
+
+        int total = imageFiles.size();
+        if (randomMode) {
+            currentIndex = pickRandomIndex(total);
+        } else {
+            currentIndex = (currentIndex + 1 + total) % total;
         }
 
-        final File file = imageFiles.get(currentIndex);
-        currentIndex++;
-        flashThenShow(file);
+        updateStatusText();
+        flashThenShow(imageFiles.get(currentIndex));
     }
 
     private void goToPrevious() {
         loadImageList();
-        updateStatusText();
 
         if (imageFiles.isEmpty()) {
             flashThenClear();
-            currentIndex = 0;
+            currentIndex = -1;
+            updateStatusText();
             return;
         }
 
-        currentIndex -= 2;
-        if (currentIndex < 0) {
-            currentIndex = imageFiles.size() - 1;
+        int total = imageFiles.size();
+        if (randomMode) {
+            currentIndex = pickRandomIndex(total);
+        } else {
+            currentIndex = (currentIndex - 1 + total) % total;
         }
 
-        final File file = imageFiles.get(currentIndex);
-        currentIndex++;
-        flashThenShow(file);
+        updateStatusText();
+        flashThenShow(imageFiles.get(currentIndex));
+    }
+
+    private int pickRandomIndex(int total) {
+        if (total <= 1) {
+            return 0;
+        }
+        int newIndex;
+        do {
+            newIndex = random.nextInt(total);
+        } while (newIndex == currentIndex);
+        return newIndex;
     }
 
     private void flashThenShow(final File file) {
@@ -233,10 +338,17 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    /** 하단 상태 표시: "현재번호_전체 images / 주기 / 모드" */
     private void updateStatusText() {
-        if (statusText != null) {
-            statusText.setText("이미지 " + imageFiles.size() + "장");
+        if (statusText == null) {
+            return;
         }
+        int total = imageFiles.size();
+        int current = (currentIndex >= 0 && total > 0) ? (currentIndex + 1) : 0;
+        String timeLabel = INTERVAL_LABELS[intervalIndex];
+        String orderLabel = randomMode ? "random" : "straight";
+
+        statusText.setText(current + "_" + total + " images / " + timeLabel + " / " + orderLabel);
     }
 
     private void displayImage(File file) {
@@ -257,7 +369,6 @@ public class MainActivity extends Activity {
         currentBitmap = grayscaled;
     }
 
-    /** 사진의 EXIF 방향 정보를 읽어서 올바른 방향으로 회전/반전시킨다 */
     private Bitmap applyExifOrientation(Bitmap src, String path) {
         Matrix matrix = new Matrix();
         boolean hasTransform = true;
@@ -386,6 +497,8 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(slideRunnable);
+        handler.removeCallbacks(rightLongPressRunnable);
+        handler.removeCallbacks(leftLongPressRunnable);
         if (currentBitmap != null && !currentBitmap.isRecycled()) {
             currentBitmap.recycle();
         }
