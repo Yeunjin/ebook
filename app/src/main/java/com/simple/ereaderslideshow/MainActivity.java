@@ -1,8 +1,6 @@
 package com.simple.ereaderslideshow;
 
-import android.Manifest;
 import android.app.Activity;
-import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
@@ -19,13 +17,12 @@ import java.util.List;
 
 /**
  * 아주 가벼운 이북 리더용 슬라이드쇼 앱.
- * - Downloads 폴더의 이미지를 1분마다 자동 전환
+ * - Downloads 폴더의 이미지를 1시간마다 자동 전환
  * - 화면이 꺼지거나 스크린세이버가 동작하지 않도록 유지
  * - 저사양 기기를 위해 라이브러리 의존성 없이 순수 SDK만 사용
  */
 public class MainActivity extends Activity {
 
-    private static final int PERMISSION_REQUEST_CODE = 100;
     private static final long INTERVAL_MS = 60 * 60 * 1000; // 1시간
 
     private static final String[] IMAGE_EXTENSIONS = {
@@ -56,32 +53,9 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         imageView = (ImageView) findViewById(R.id.imageView);
 
-        if (needsPermission()) {
-            requestPermission();
-        } else {
-            startSlideshow();
-        }
-    }
-
-    private boolean needsPermission() {
-        return android.os.Build.VERSION.SDK_INT >= 23
-                && checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
-                        != PackageManager.PERMISSION_GRANTED;
-    }
-
-    private void requestPermission() {
-        requestPermissions(
-                new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
-                PERMISSION_REQUEST_CODE);
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startSlideshow();
-            }
-        }
+        // 타겟 기기가 구형(API 17)이라 권한은 설치 시점에 자동으로 부여됨.
+        // 런타임 권한 요청 절차가 필요 없음.
+        startSlideshow();
     }
 
     private void startSlideshow() {
