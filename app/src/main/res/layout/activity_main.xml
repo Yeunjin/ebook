@@ -10,4 +10,15 @@
         android:layout_height="match_parent"
         android:scaleType="fitCenter" />
 
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:background="#000000"
+        android:textColor="#00FF00"
+        android:textSize="12sp"
+        android:padding="6dp"
+        android:text="" />
+
 </RelativeLayout>
