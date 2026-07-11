@@ -1,20 +1,20 @@
-apply plugin: 'com.android.application'
-
-android {
-    compileSdkVersion 19
-    buildToolsVersion "30.0.3"
-
-    defaultConfig {
-        applicationId "com.simple.ereaderslideshow"
-        minSdkVersion 16
-        targetSdkVersion 17
-        versionCode 1
-        versionName "1.0"
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
     }
-
-    buildTypes {
-        release {
-            minifyEnabled false
-        }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:7.0.4'
     }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
 }
