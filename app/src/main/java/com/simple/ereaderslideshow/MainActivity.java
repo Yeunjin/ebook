@@ -28,14 +28,13 @@ import java.util.Random;
 
 public class MainActivity extends Activity {
 
-    private static final long FLASH_STEP_MS = 150;   // 잔상 제거용 깜빡임 간격
-    private static final long LONG_PRESS_MS = 800;    // 길게 누름 판정 시간
+    private static final long FLASH_STEP_MS = 150;     // 잔상 제거용 깜빡임 간격
+    private static final long DOUBLE_CLICK_TIME_MS = 400; // 더블 클릭 판정 시간 (0.4초)
 
     private static final String[] IMAGE_EXTENSIONS = {
             ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"
     };
 
-    // 전환 주기 옵션: 5분, 15분, 30분, 60분, 12시간, 24시간
     private static final long[] INTERVAL_OPTIONS_MS = {
             5 * 60 * 1000L,
             15 * 60 * 1000L,
@@ -54,39 +53,37 @@ public class MainActivity extends Activity {
     private final List<File> imageFiles = new ArrayList<>();
     private final Random random = new Random();
 
-    private int currentIndex = -1;      // 현재 표시 중인 이미지 위치 (0-based)
+    private int currentIndex = -1;
     private int intervalIndex = 3;      // 기본값: 60분
     private long intervalMs = INTERVAL_OPTIONS_MS[intervalIndex];
-    private boolean randomMode = false; // false = 파일명 순번(straight), true = 랜덤
+    private boolean randomMode = false;
 
     private Bitmap currentBitmap;
 
-    private boolean rightLongPressTriggered = false;
-    private boolean leftLongPressTriggered = false;
+    // 더블 클릭 판정을 위한 변수
+    private long lastRightClickTime = 0;
+    private long lastLeftClickTime = 0;
+    
+    // 크레마 기기 자체의 연타 입력을 방지하기 위한 디바운스 타이머 작업
+    private final Runnable pendingRightClickRunnable = new Runnable() {
+        @Override
+        public void run() {
+            manualNext();
+        }
+    };
+
+    private final Runnable pendingLeftClickRunnable = new Runnable() {
+        @Override
+        public void run() {
+            manualPrevious();
+        }
+    };
 
     private final Runnable slideRunnable = new Runnable() {
         @Override
         public void run() {
             goToNext();
             handler.postDelayed(this, intervalMs);
-        }
-    };
-
-    // [수정] 우측 길게 누름: 간격 조정 (동작 후 플래그 확실히 true 고정)
-    private final Runnable rightLongPressRunnable = new Runnable() {
-        @Override
-        public void run() {
-            rightLongPressTriggered = true;
-            cycleInterval();
-        }
-    };
-
-    // [수정] 좌측 길게 누름: 랜덤 모드 토글 (동작 후 플래그 확실히 true 고정)
-    private final Runnable leftLongPressRunnable = new Runnable() {
-        @Override
-        public void run() {
-            leftLongPressTriggered = true;
-            toggleRandomMode();
         }
     };
 
@@ -106,6 +103,7 @@ public class MainActivity extends Activity {
         handler.postDelayed(slideRunnable, intervalMs);
     }
 
+    // 크레마 물리 버튼은 OS 레벨 가로채기를 피하기 위해 onKeyUp에서만 처리합니다.
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         switch (keyCode) {
@@ -113,22 +111,11 @@ public class MainActivity extends Activity {
             case KeyEvent.KEYCODE_PAGE_DOWN:
             case KeyEvent.KEYCODE_VOLUME_DOWN:
             case KeyEvent.KEYCODE_CHANNEL_DOWN:
-                if (event.getRepeatCount() == 0) {
-                    rightLongPressTriggered = false; // 누르기 시작할 때 초기화
-                    handler.postDelayed(rightLongPressRunnable, LONG_PRESS_MS);
-                }
-                return true;
-
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_PAGE_UP:
             case KeyEvent.KEYCODE_VOLUME_UP:
             case KeyEvent.KEYCODE_CHANNEL_UP:
-                if (event.getRepeatCount() == 0) {
-                    leftLongPressTriggered = false; // 누르기 시작할 때 초기화
-                    handler.postDelayed(leftLongPressRunnable, LONG_PRESS_MS);
-                }
-                return true;
-
+                return true; // OS가 볼륨 조절 다이얼로그를 띄우지 못하게 이벤트를 소비합니다.
             default:
                 return super.onKeyDown(keyCode, event);
         }
@@ -136,29 +123,41 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        long currentTime = System.currentTimeMillis();
+
         switch (keyCode) {
             case KeyEvent.KEYCODE_DPAD_RIGHT:
             case KeyEvent.KEYCODE_PAGE_DOWN:
             case KeyEvent.KEYCODE_VOLUME_DOWN:
             case KeyEvent.KEYCODE_CHANNEL_DOWN:
-                handler.removeCallbacks(rightLongPressRunnable); // 예약된 롱프레스 취소
-                if (!rightLongPressTriggered) {
-                    // 롱프레스가 발동하지 않은 '짧은 누름'일 때만 다음 사진으로 이동
-                    manualNext();
+                // 이전 클릭과의 간격이 0.4초 이내면 더블 클릭으로 판단
+                if (currentTime - lastRightClickTime < DOUBLE_CLICK_TIME_MS) {
+                    handler.removeCallbacks(pendingRightClickRunnable); // 단발성 클릭 예약 취소
+                    cycleInterval(); // 주기 변경 실행
+                    lastRightClickTime = 0; // 판정 시간 초기화
+                } else {
+                    lastRightClickTime = currentTime;
+                    // 크레마가 다음 더블클릭 입력을 보낼 수 있으므로 잠시 실행을 대기(예약)합니다.
+                    handler.removeCallbacks(pendingRightClickRunnable);
+                    handler.postDelayed(pendingRightClickRunnable, DOUBLE_CLICK_TIME_MS);
                 }
-                rightLongPressTriggered = false; // 떼어낼 때 플래그 초기화
                 return true;
 
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_PAGE_UP:
             case KeyEvent.KEYCODE_VOLUME_UP:
             case KeyEvent.KEYCODE_CHANNEL_UP:
-                handler.removeCallbacks(leftLongPressRunnable); // 예약된 롱프레스 취소
-                if (!leftLongPressTriggered) {
-                    // 롱프레스가 발동하지 않은 '짧은 누름'일 때만 이전 사진으로 이동
-                    manualPrevious();
+                // 이전 클릭과의 간격이 0.4초 이내면 더블 클릭으로 판단
+                if (currentTime - lastLeftClickTime < DOUBLE_CLICK_TIME_MS) {
+                    handler.removeCallbacks(pendingLeftClickRunnable); // 단발성 클릭 예약 취소
+                    toggleRandomMode(); // 랜덤 모드 토글 실행
+                    lastLeftClickTime = 0; // 판정 시간 초기화
+                } else {
+                    lastLeftClickTime = currentTime;
+                    // 크레마가 다음 더블클릭 입력을 보낼 수 있으므로 잠시 실행을 대기(예약)합니다.
+                    handler.removeCallbacks(pendingLeftClickRunnable);
+                    handler.postDelayed(pendingLeftClickRunnable, DOUBLE_CLICK_TIME_MS);
                 }
-                leftLongPressTriggered = false; // 떼어낼 때 플래그 초기화
                 return true;
 
             default:
@@ -178,7 +177,6 @@ public class MainActivity extends Activity {
         handler.postDelayed(slideRunnable, intervalMs);
     }
 
-    /** 우측 버튼 길게 누름: 전환 주기를 순환 */
     private void cycleInterval() {
         intervalIndex = (intervalIndex + 1) % INTERVAL_OPTIONS_MS.length;
         intervalMs = INTERVAL_OPTIONS_MS[intervalIndex];
@@ -189,7 +187,6 @@ public class MainActivity extends Activity {
         updateStatusText();
     }
 
-    /** 좌측 버튼 길게 누름: 랜덤 <-> 파일명 순번 모드 전환 */
     private void toggleRandomMode() {
         randomMode = !randomMode;
         updateStatusText();
@@ -392,7 +389,7 @@ public class MainActivity extends Activity {
                 case ExifInterface.ORIENTATION_ROTATE_270:
                     matrix.setRotate(270);
                     break;
-                case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                case KeyEvent.KEYCODE_DPAD_LEFT:
                     matrix.setScale(-1, 1);
                     break;
                 case ExifInterface.ORIENTATION_FLIP_VERTICAL:
@@ -501,8 +498,8 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(slideRunnable);
-        handler.removeCallbacks(rightLongPressRunnable);
-        handler.removeCallbacks(leftLongPressRunnable);
+        handler.removeCallbacks(pendingRightClickRunnable);
+        handler.removeCallbacks(pendingLeftClickRunnable);
         if (currentBitmap != null && !currentBitmap.isRecycled()) {
             currentBitmap.recycle();
         }
